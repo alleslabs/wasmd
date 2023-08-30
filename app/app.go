@@ -123,6 +123,9 @@ import (
 
 	govclient "github.com/cosmos/cosmos-sdk/x/gov/client"
 
+	"github.com/CosmWasm/wasmd/hooks"
+	"github.com/CosmWasm/wasmd/hooks/common"
+	"github.com/CosmWasm/wasmd/hooks/emitter"
 	"github.com/CosmWasm/wasmd/x/wasm"
 	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
 	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
@@ -298,6 +301,13 @@ type WasmApp struct {
 
 	// module configurator
 	configurator module.Configurator
+
+	// DeliverContext is set during InitGenesis/BeginBlock and cleared during Commit.
+	// It allows anyone to read/mutate Osmosis consensus state at anytime.
+	DeliverContext sdk.Context
+
+	// List of hooks
+	hooks common.Hooks
 }
 
 // NewWasmApp returns a reference to an initialized WasmApp.
@@ -789,6 +799,13 @@ func NewWasmApp(
 	app.SetEndBlocker(app.EndBlocker)
 	app.setAnteHandler(encodingConfig.TxConfig, wasmConfig, keys[wasmtypes.StoreKey])
 
+	// Initialize emitter hook and append to the app hooks.
+	withEmitter := cast.ToBool(appOpts.Get(hooks.FlagWithEmitter))
+	app.hooks = make(common.Hooks, 0)
+	if withEmitter {
+		app.hooks = append(app.hooks, emitter.NewHook(encodingConfig, app.StakingKeeper, &app.GovKeeper, &app.WasmKeeper, &app.AccountKeeper, logger))
+	}
+
 	// must be before Loading version
 	// requires the snapshot store to be created and registered as a BaseAppOption
 	// see cmd/wasmd/root.go: 206 - 214 approx
@@ -880,12 +897,29 @@ func (app *WasmApp) Name() string { return app.BaseApp.Name() }
 
 // BeginBlocker application updates every begin block
 func (app *WasmApp) BeginBlocker(ctx sdk.Context, req abci.RequestBeginBlock) abci.ResponseBeginBlock {
-	return app.ModuleManager.BeginBlock(ctx, req)
+	app.DeliverContext = ctx
+	res := app.ModuleManager.BeginBlock(ctx, req)
+	cacheContext, _ := ctx.CacheContext()
+	app.hooks.AfterBeginBlock(cacheContext, req, res)
+
+	return res
 }
 
 // EndBlocker application updates every end block
 func (app *WasmApp) EndBlocker(ctx sdk.Context, req abci.RequestEndBlock) abci.ResponseEndBlock {
-	return app.ModuleManager.EndBlock(ctx, req)
+	res := app.ModuleManager.EndBlock(ctx, req)
+	cacheContext, _ := ctx.CacheContext()
+	app.hooks.AfterEndBlock(cacheContext, req, res)
+
+	return res
+}
+
+// Commit overrides the default BaseApp's ABCI commit by adding DeliverContext clearing.
+func (app *WasmApp) Commit() (res abci.ResponseCommit) {
+	app.hooks.BeforeCommit()
+	app.DeliverContext = sdk.Context{}
+
+	return app.BaseApp.Commit()
 }
 
 func (app *WasmApp) Configurator() module.Configurator {
@@ -898,8 +932,22 @@ func (app *WasmApp) InitChainer(ctx sdk.Context, req abci.RequestInitChain) abci
 	if err := json.Unmarshal(req.AppStateBytes, &genesisState); err != nil {
 		panic(err)
 	}
+
 	app.UpgradeKeeper.SetModuleVersionMap(ctx, app.ModuleManager.GetVersionMap())
-	return app.ModuleManager.InitGenesis(ctx, app.appCodec, genesisState)
+	res := app.ModuleManager.InitGenesis(ctx, app.appCodec, genesisState)
+	cacheContext, _ := ctx.CacheContext()
+	app.hooks.AfterInitChain(cacheContext, req, res)
+
+	return res
+}
+
+// DeliverTx overwrite DeliverTx to apply the AfterDeliverTx hook.
+func (app *WasmApp) DeliverTx(req abci.RequestDeliverTx) abci.ResponseDeliverTx {
+	res := app.BaseApp.DeliverTx(req)
+	cacheCtx, _ := app.DeliverContext.CacheContext()
+	app.hooks.AfterDeliverTx(cacheCtx, req, res)
+
+	return res
 }
 
 // LoadHeight loads a particular height
