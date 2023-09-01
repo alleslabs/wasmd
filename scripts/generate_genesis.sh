@@ -29,4 +29,9 @@ wasmd genesis collect-gentxs
 
 # change deposit and voting periods to 1 minuite
 sed -i 's/172800s/60s/' ~/.wasmd/config/genesis.json
-cp -r ~/.wasmd/config docker-config
+
+rm -r docker-config/config
+mkdir docker-config/config
+cp ~/.wasmd/config/app.toml docker-config/config
+cp ~/.wasmd/config/config.toml docker-config/config
+cp ~/.wasmd/config/genesis.json docker-config/config
