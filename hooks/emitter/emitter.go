@@ -9,6 +9,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	abci "github.com/cometbft/cometbft/abci/types"
 	"github.com/cometbft/cometbft/crypto/tmhash"
 	tmjson "github.com/cometbft/cometbft/libs/json"
@@ -35,8 +39,9 @@ type Hook struct {
 	msgs           []common.Message      // The list of all Kafka messages to be published for this block
 	adapters       []Adapter             // Array of adapters needed for the hook
 	accVerifiers   []AccountVerifier     // Array of AccountVerifier needed for account verification
-	height         int64
-	logger         log.Logger
+	height         int64                 // The current block height
+	logger         log.Logger            // Logger instance
+	uploader       *manager.Uploader     // S3 uploader instance
 }
 
 // NewHook creates an emitter hook instance that will be added in the Osmosis App.
@@ -48,12 +53,21 @@ func NewHook(
 	accountKeeper *authkeeper.AccountKeeper,
 	logger log.Logger,
 ) *Hook {
+	fmt.Println("MESSAGES_TOPIC", os.Getenv("MESSAGES_TOPIC"))
 	bootstrapServer := os.Getenv("KAFKA_BOOTSTRAP_SERVER")
-	messagesTopic := os.Getenv("KAFKA_MESSAGES_TOPIC")
+	messagesTopic := os.Getenv("MESSAGES_TOPIC")
 	mechanism := plain.Mechanism{
 		Username: os.Getenv("KAFKA_API_KEY"),
 		Password: os.Getenv("KAFKA_API_SECRET"),
 	}
+
+	creds := credentials.NewStaticCredentialsProvider(os.Getenv("AWS_ACCESS_KEY"), os.Getenv("AWS_SECRET_KEY"), "")
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithCredentialsProvider(creds), config.WithRegion("ap-southeast-1"))
+	if err != nil {
+		logger.Error(fmt.Sprintf("cannot load AWS config: %v", err))
+		panic(err)
+	}
+	awsS3Client := s3.NewFromConfig(cfg)
 
 	return &Hook{
 		encodingConfig: encodingConfig,
@@ -83,7 +97,8 @@ func NewHook(
 			ContractAccountVerifier{keeper: *wasmKeeper},
 			AuthAccountVerifier{keeper: *accountKeeper},
 		},
-		logger: logger,
+		logger:   logger,
+		uploader: manager.NewUploader(awsS3Client),
 	}
 }
 
@@ -101,23 +116,24 @@ func (h *Hook) AddAccountsInTx(accs ...string) {
 	}
 }
 
-func (h *Hook) uploadToGCS(objectPath string, msg common.Message) {
+func (h *Hook) uploadToStorage(objectPath string, msg common.Message) {
 	messageInBytes, _ := json.Marshal(msg)
 
-	h.logger.Info(fmt.Sprintf("uploading to GCS: %s", objectPath))
+	h.logger.Info(fmt.Sprintf("uploading to Storage: %s", objectPath))
 	// retry this 5 times
 	var err error
 	for i := 0; i < 5; i++ {
-		if err = UploadFile(os.Getenv("GCS_BUCKET"), objectPath, messageInBytes); err != nil {
-			h.logger.Error(fmt.Sprintf("cannot upload to GCS: %v [attempt: %d]", err, i+1))
+		if err = UploadFile(h.uploader, os.Getenv("CLAIM_CHECK_BUCKET"), objectPath, messageInBytes); err != nil {
+			h.logger.Error(fmt.Sprintf("cannot upload to Storage: %v [attempt: %d]", err, i+1))
 			time.Sleep(time.Second * time.Duration(i+1))
 			continue
 		}
+
 		break
 	}
 
 	if err != nil {
-		h.logger.Error(fmt.Sprintf("cannot upload to GCS: %v", err))
+		h.logger.Error(fmt.Sprintf("cannot upload to Storage: %v", err))
 		panic(err)
 	}
 }
@@ -139,7 +155,7 @@ func (h *Hook) FlushMessages() {
 			objectPath := fmt.Sprintf("%d-%s-%s", h.height, msg.Key, hex.EncodeToString(tmhash.Sum(res)))
 
 			// upload with retry
-			h.uploadToGCS(objectPath, msg)
+			h.uploadToStorage(objectPath, msg)
 
 			value, _ := json.Marshal(common.JsDict{
 				"object_path": objectPath,

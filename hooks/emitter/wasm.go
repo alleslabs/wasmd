@@ -14,9 +14,8 @@ import (
 	"github.com/CosmWasm/wasmd/app/params"
 	"github.com/CosmWasm/wasmd/hooks/common"
 	"github.com/CosmWasm/wasmd/x/wasm"
-	wasmkeeper "github.com/CosmWasm/wasmd/x/wasm/keeper"
+	"github.com/CosmWasm/wasmd/x/wasm/keeper"
 	"github.com/CosmWasm/wasmd/x/wasm/types"
-	wasmtypes "github.com/CosmWasm/wasmd/x/wasm/types"
 )
 
 var _ Adapter = &WasmAdapter{}
@@ -42,12 +41,12 @@ type WasmAdapter struct {
 	codeIDInstantiateFromProposal []uint64
 
 	// keepers
-	wasmKeeper *wasmkeeper.Keeper
+	wasmKeeper *keeper.Keeper
 	govKeeper  *govkeeper.Keeper
 }
 
 // NewWasmAdapter creates new WasmAdapter instance that will be added to the emitter hook adapters.
-func NewWasmAdapter(wasmKeeper *wasmkeeper.Keeper, govKeeper *govkeeper.Keeper) *WasmAdapter {
+func NewWasmAdapter(wasmKeeper *keeper.Keeper, govKeeper *govkeeper.Keeper) *WasmAdapter {
 	return &WasmAdapter{
 		contractTxs:     make(map[string]bool),
 		isStoreCodeTx:   false,
@@ -66,14 +65,14 @@ func NewWasmAdapter(wasmKeeper *wasmkeeper.Keeper, govKeeper *govkeeper.Keeper) 
 
 // AfterInitChain extracts codes and contracts from the given genesis state.
 func (wa *WasmAdapter) AfterInitChain(ctx sdk.Context, encodingConfig params.EncodingConfig, genesisState map[string]json.RawMessage, kafka *[]common.Message) {
-	var wasmGenesis wasmtypes.GenesisState
-	if genesisState[wasmtypes.ModuleName] != nil {
-		encodingConfig.Marshaler.MustUnmarshalJSON(genesisState[wasmtypes.ModuleName], &wasmGenesis)
+	var wasmGenesis types.GenesisState
+	if genesisState[types.ModuleName] != nil {
+		encodingConfig.Marshaler.MustUnmarshalJSON(genesisState[types.ModuleName], &wasmGenesis)
 	}
 	for _, code := range wasmGenesis.Codes {
 		addresses := make([]string, 0)
 		switch code.CodeInfo.InstantiateConfig.Permission {
-		case wasmtypes.AccessTypeAnyOfAddresses:
+		case types.AccessTypeAnyOfAddresses:
 			addresses = code.CodeInfo.InstantiateConfig.Addresses
 		}
 		uploader, _ := sdk.AccAddressFromBech32(code.CodeInfo.Creator)
@@ -121,8 +120,8 @@ func (wa *WasmAdapter) AfterInitChain(ctx sdk.Context, encodingConfig params.Enc
 
 // AfterBeginBlock assigns updated values to the adapter variables before processing transactions in each block.
 func (wa *WasmAdapter) AfterBeginBlock(ctx sdk.Context, _ abci.RequestBeginBlock, _ common.EvMap, _ *[]common.Message) {
-	wa.maxCodeIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastCodeID)
-	wa.maxInstanceIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastInstanceID)
+	wa.maxCodeIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastCodeID)
+	wa.maxInstanceIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastInstanceID)
 	wa.codeIDInstantiateFromProposal = make([]uint64, 0)
 }
 
@@ -140,23 +139,23 @@ func (wa *WasmAdapter) PreDeliverTx() {
 // CheckMsg checks the message type and extracts message values to WasmAdapter maps and flags accordingly.
 func (wa *WasmAdapter) CheckMsg(_ sdk.Context, msg sdk.Msg) {
 	switch msg := msg.(type) {
-	case *wasmtypes.MsgStoreCode:
+	case *types.MsgStoreCode:
 		wa.isStoreCodeTx = true
-	case *wasmtypes.MsgInstantiateContract:
+	case *types.MsgInstantiateContract:
 		wa.isInstantiateTx = true
-	case *wasmtypes.MsgExecuteContract:
+	case *types.MsgExecuteContract:
 		wa.isExecuteTx = true
 		wa.contractTxs[msg.Contract] = false
-	case *wasmtypes.MsgUpdateAdmin:
+	case *types.MsgUpdateAdmin:
 		wa.isUpdateAdmin = true
 		wa.contractTxs[msg.Contract] = false
-	case *wasmtypes.MsgClearAdmin:
+	case *types.MsgClearAdmin:
 		wa.isClearAdmin = true
 		wa.contractTxs[msg.Contract] = false
-	case *wasmtypes.MsgMigrateContract:
+	case *types.MsgMigrateContract:
 		wa.isMigrate = true
 		wa.contractTxs[msg.Contract] = false
-	case *wasmtypes.MsgInstantiateContract2:
+	case *types.MsgInstantiateContract2:
 		wa.isInstantiateTx = true
 	case *channeltypes.MsgRecvPacket:
 		if contractAddr, err := wasm.ContractFromPortID(msg.Packet.DestinationPort); err == nil {
@@ -238,7 +237,7 @@ func (wa *WasmAdapter) PostDeliverTx(ctx sdk.Context, txHash []byte, txDict comm
 	txDict["is_update_admin"] = wa.isUpdateAdmin
 	txDict["is_clear_admin"] = wa.isClearAdmin
 	txDict["is_migrate"] = wa.isMigrate
-	wa.lastInstanceID = wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastInstanceID)
+	wa.lastInstanceID = wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastInstanceID)
 }
 
 // AfterEndBlock checks for wasm related ActiveProposal events and process them accordingly.
@@ -259,8 +258,8 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 						panic(err)
 					}
 					switch content := content.(type) {
-					case *wasmtypes.StoreCodeProposal:
-						lastCodeID := wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastCodeID)
+					case *types.StoreCodeProposal:
+						lastCodeID := wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastCodeID)
 						for id := wa.maxCodeIDfromTx; id < lastCodeID; id++ {
 							codeInfo := wa.wasmKeeper.GetCodeInfo(ctx, id)
 							if codeInfo == nil {
@@ -268,7 +267,7 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 							}
 							addresses := make([]string, 0)
 							switch codeInfo.InstantiateConfig.Permission {
-							case wasmtypes.AccessTypeAnyOfAddresses:
+							case types.AccessTypeAnyOfAddresses:
 								addresses = codeInfo.InstantiateConfig.Addresses
 							}
 
@@ -286,13 +285,13 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 								"resolved_height": ctx.BlockHeight(),
 							})
 						}
-					case *wasmtypes.InstantiateContractProposal:
-						contractAddr := wasmkeeper.BuildContractAddressClassic(content.CodeID, wa.lastInstanceID)
+					case *types.InstantiateContractProposal:
+						contractAddr := keeper.BuildContractAddressClassic(content.CodeID, wa.lastInstanceID)
 						wa.updateContractVersion(ctx, contractAddr.String(), kafka)
 						histories := wa.wasmKeeper.GetContractHistory(ctx, contractAddr)
 						info := wa.wasmKeeper.GetContractInfo(ctx, contractAddr)
 						for _, history := range histories {
-							if history.Operation == wasmtypes.ContractCodeHistoryOperationTypeInit {
+							if history.Operation == types.ContractCodeHistoryOperationTypeInit {
 								common.AppendMessage(kafka, "NEW_CONTRACT", common.JsDict{
 									"address":           contractAddr,
 									"code_id":           history.CodeID,
@@ -317,14 +316,14 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 									"block_height":     ctx.BlockHeight(),
 									"remark": common.JsDict{
 										"type":      "governance",
-										"operation": wasmtypes.ContractCodeHistoryOperationTypeInit.String(),
+										"operation": types.ContractCodeHistoryOperationTypeInit.String(),
 										"value":     proposalId,
 									},
 								})
 							}
 							break
 						}
-					case *wasmtypes.MigrateContractProposal:
+					case *types.MigrateContractProposal:
 						wa.updateContractVersion(ctx, content.Contract, kafka)
 						common.AppendMessage(kafka, "UPDATE_CONTRACT_CODE_ID", common.JsDict{
 							"contract": content.Contract,
@@ -342,11 +341,11 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 							"block_height":     ctx.BlockHeight(),
 							"remark": common.JsDict{
 								"type":      "governance",
-								"operation": wasmtypes.ContractCodeHistoryOperationTypeMigrate.String(),
+								"operation": types.ContractCodeHistoryOperationTypeMigrate.String(),
 								"value":     proposalId,
 							},
 						})
-					case *wasmtypes.UpdateAdminProposal:
+					case *types.UpdateAdminProposal:
 						common.AppendMessage(kafka, "UPDATE_CONTRACT_ADMIN", common.JsDict{
 							"contract": content.Contract,
 							"admin":    content.NewAdmin,
@@ -356,7 +355,7 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 							"proposal_id":      proposalId,
 							"resolved_height":  ctx.BlockHeight(),
 						})
-					case *wasmtypes.ClearAdminProposal:
+					case *types.ClearAdminProposal:
 						common.AppendMessage(kafka, "UPDATE_CONTRACT_ADMIN", common.JsDict{
 							"contract": content.Contract,
 							"admin":    "",
@@ -366,15 +365,15 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 							"proposal_id":      proposalId,
 							"resolved_height":  ctx.BlockHeight(),
 						})
-					case *wasmtypes.ExecuteContractProposal:
+					case *types.ExecuteContractProposal:
 						common.AppendMessage(kafka, "UPDATE_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 							"resolved_height":  ctx.BlockHeight(),
 						})
 					}
-				case *wasmtypes.MsgStoreCode:
-					lastCodeID := wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastCodeID)
+				case *types.MsgStoreCode:
+					lastCodeID := wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastCodeID)
 					for id := wa.maxCodeIDfromTx; id < lastCodeID; id++ {
 						codeInfo := wa.wasmKeeper.GetCodeInfo(ctx, id)
 						if codeInfo == nil {
@@ -382,7 +381,7 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 						}
 						addresses := make([]string, 0)
 						switch codeInfo.InstantiateConfig.Permission {
-						case wasmtypes.AccessTypeAnyOfAddresses:
+						case types.AccessTypeAnyOfAddresses:
 							addresses = codeInfo.InstantiateConfig.Addresses
 						}
 
@@ -400,13 +399,13 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 							"resolved_height": ctx.BlockHeight(),
 						})
 					}
-				case *wasmtypes.MsgInstantiateContract:
-					contractAddr := wasmkeeper.BuildContractAddressClassic(msg.CodeID, wa.lastInstanceID)
+				case *types.MsgInstantiateContract:
+					contractAddr := keeper.BuildContractAddressClassic(msg.CodeID, wa.lastInstanceID)
 					wa.updateContractVersion(ctx, contractAddr.String(), kafka)
 					histories := wa.wasmKeeper.GetContractHistory(ctx, contractAddr)
 					info := wa.wasmKeeper.GetContractInfo(ctx, contractAddr)
 					for _, history := range histories {
-						if history.Operation == wasmtypes.ContractCodeHistoryOperationTypeInit {
+						if history.Operation == types.ContractCodeHistoryOperationTypeInit {
 							common.AppendMessage(kafka, "NEW_CONTRACT", common.JsDict{
 								"address":           contractAddr,
 								"code_id":           history.CodeID,
@@ -431,14 +430,14 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 								"block_height":     ctx.BlockHeight(),
 								"remark": common.JsDict{
 									"type":      "governance",
-									"operation": wasmtypes.ContractCodeHistoryOperationTypeInit.String(),
+									"operation": types.ContractCodeHistoryOperationTypeInit.String(),
 									"value":     proposalId,
 								},
 							})
 						}
 						break
 					}
-				case *wasmtypes.MsgMigrateContract:
+				case *types.MsgMigrateContract:
 					wa.updateContractVersion(ctx, msg.Contract, kafka)
 					common.AppendMessage(kafka, "UPDATE_CONTRACT_CODE_ID", common.JsDict{
 						"contract": msg.Contract,
@@ -456,11 +455,11 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 						"block_height":     ctx.BlockHeight(),
 						"remark": common.JsDict{
 							"type":      "governance",
-							"operation": wasmtypes.ContractCodeHistoryOperationTypeMigrate.String(),
+							"operation": types.ContractCodeHistoryOperationTypeMigrate.String(),
 							"value":     proposalId,
 						},
 					})
-				case *wasmtypes.MsgUpdateAdmin:
+				case *types.MsgUpdateAdmin:
 					common.AppendMessage(kafka, "UPDATE_CONTRACT_ADMIN", common.JsDict{
 						"contract": msg.Contract,
 						"admin":    msg.NewAdmin,
@@ -470,7 +469,7 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 						"proposal_id":      proposalId,
 						"resolved_height":  ctx.BlockHeight(),
 					})
-				case *wasmtypes.MsgClearAdmin:
+				case *types.MsgClearAdmin:
 					common.AppendMessage(kafka, "UPDATE_CONTRACT_ADMIN", common.JsDict{
 						"contract": msg.Contract,
 						"admin":    "",
@@ -480,7 +479,7 @@ func (wa *WasmAdapter) AfterEndBlock(ctx sdk.Context, _ abci.RequestEndBlock, ev
 						"proposal_id":      proposalId,
 						"resolved_height":  ctx.BlockHeight(),
 					})
-				case *wasmtypes.MsgExecuteContract:
+				case *types.MsgExecuteContract:
 					common.AppendMessage(kafka, "UPDATE_CONTRACT_PROPOSAL", common.JsDict{
 						"contract_address": msg.Contract,
 						"proposal_id":      proposalId,
@@ -507,49 +506,49 @@ func (wa *WasmAdapter) updateContractProposalEvents(ctx sdk.Context, evMap commo
 						panic(err)
 					}
 					switch content := content.(type) {
-					case *wasmtypes.MigrateContractProposal:
+					case *types.MigrateContractProposal:
 						common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 						})
-					case *wasmtypes.SudoContractProposal:
+					case *types.SudoContractProposal:
 						common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 						})
-					case *wasmtypes.ExecuteContractProposal:
+					case *types.ExecuteContractProposal:
 						common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 						})
-					case *wasmtypes.UpdateAdminProposal:
+					case *types.UpdateAdminProposal:
 						common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 						})
-					case *wasmtypes.ClearAdminProposal:
+					case *types.ClearAdminProposal:
 						common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 							"contract_address": content.Contract,
 							"proposal_id":      proposalId,
 						})
 					}
-				case *wasmtypes.MsgMigrateContract:
+				case *types.MsgMigrateContract:
 					common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 						"contract_address": msg.Contract,
 						"proposal_id":      proposalId,
 					})
 
-				case *wasmtypes.MsgExecuteContract:
+				case *types.MsgExecuteContract:
 					common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 						"contract_address": msg.Contract,
 						"proposal_id":      proposalId,
 					})
-				case *wasmtypes.MsgUpdateAdmin:
+				case *types.MsgUpdateAdmin:
 					common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 						"contract_address": msg.Contract,
 						"proposal_id":      proposalId,
 					})
-				case *wasmtypes.MsgClearAdmin:
+				case *types.MsgClearAdmin:
 					common.AppendMessage(kafka, "NEW_CONTRACT_PROPOSAL", common.JsDict{
 						"contract_address": msg.Contract,
 						"proposal_id":      proposalId,
@@ -566,10 +565,10 @@ func (wa *WasmAdapter) updateNewCodeEvents(ctx sdk.Context, txHash []byte, msg s
 		for _, rawId := range rawIDs {
 			id := common.Atoui(rawId)
 			codeInfo := wa.wasmKeeper.GetCodeInfo(ctx, id)
-			wa.maxCodeIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastCodeID)
+			wa.maxCodeIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastCodeID)
 			addresses := make([]string, 0)
 			switch codeInfo.InstantiateConfig.Permission {
-			case wasmtypes.AccessTypeAnyOfAddresses:
+			case types.AccessTypeAnyOfAddresses:
 				addresses = codeInfo.InstantiateConfig.Addresses
 			}
 			common.AppendMessage(kafka, "NEW_CODE", common.JsDict{
@@ -610,7 +609,7 @@ func (wa *WasmAdapter) updateContractVersion(ctx sdk.Context, contract string, k
 // updateNewContractEvents handles contract Instantiate events that might be emitted from the transaction.
 func (wa *WasmAdapter) updateNewContractEvents(ctx sdk.Context, txHash []byte, evMap common.EvMap, kafka *[]common.Message) {
 	if events, ok := evMap[types.EventTypeInstantiate+"."+types.AttributeKeyContractAddr]; ok {
-		wa.maxInstanceIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, wasmtypes.KeyLastInstanceID)
+		wa.maxInstanceIDfromTx = wa.wasmKeeper.PeekAutoIncrementID(ctx, types.KeyLastInstanceID)
 		for _, contractAddr := range events {
 			addr, _ := sdk.AccAddressFromBech32(contractAddr)
 			histories := wa.wasmKeeper.GetContractHistory(ctx, addr)
@@ -667,7 +666,7 @@ func (wa *WasmAdapter) updateMigrateContractEvents(ctx sdk.Context, txHash []byt
 				"block_height":     ctx.BlockHeight(),
 				"remark": common.JsDict{
 					"type":      "transaction",
-					"operation": wasmtypes.ContractCodeHistoryOperationTypeMigrate.String(),
+					"operation": types.ContractCodeHistoryOperationTypeMigrate.String(),
 					"value":     fmt.Sprintf("%X", txHash),
 				},
 			})

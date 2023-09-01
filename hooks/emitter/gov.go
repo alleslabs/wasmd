@@ -71,7 +71,7 @@ func (ga *GovAdapter) HandleMsgEvents(ctx sdk.Context, txHash []byte, msg sdk.Ms
 				if err != nil {
 					panic(err)
 				}
-				err = json.Unmarshal(proposalMsgJson, &proposalMsgJsDict)
+				_ = json.Unmarshal(proposalMsgJson, &proposalMsgJsDict)
 				proposalMsgJsDict["@type"] = sdk.MsgTypeURL(proposalMsg)
 				proposalMsgs = append(proposalMsgs, proposalMsgJsDict)
 			}
