@@ -11,8 +11,8 @@ echo "lock nasty suffer dirt dream fine fall deal curtain plate husband sound to
 echo "smile stem oven genius cave resource better lunar nasty moon company ridge brass rather supply used horn three panic put venue analyst leader comic" \
     | wasmd keys add requester --recover --keyring-backend test
 
-cp ./docker-config/single-validator/priv_validator_key.json ~/.wasmd/config/priv_validator_key.json
-cp ./docker-config/single-validator/node_key.json ~/.wasmd/config/node_key.json
+cp ./celatone-docker/single-validator/priv_validator_key.json ~/.wasmd/config/priv_validator_key.json
+cp ./celatone-docker/single-validator/node_key.json ~/.wasmd/config/node_key.json
 
 # add accounts to genesis
 wasmd genesis add-genesis-account validator 10000000000000stake --keyring-backend test
@@ -30,8 +30,8 @@ wasmd genesis collect-gentxs
 # change deposit and voting periods to 1 minuite
 sed -i 's/172800s/60s/' ~/.wasmd/config/genesis.json
 
-rm -r docker-config/config
-mkdir docker-config/config
-cp ~/.wasmd/config/app.toml docker-config/config
-cp ~/.wasmd/config/config.toml docker-config/config
-cp ~/.wasmd/config/genesis.json docker-config/config
+rm -r celatone-docker/config
+mkdir celatone-docker/config
+cp ~/.wasmd/config/app.toml celatone-docker/config
+cp ~/.wasmd/config/config.toml celatone-docker/config
+cp ~/.wasmd/config/genesis.json celatone-docker/config
