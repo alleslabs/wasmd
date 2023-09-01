@@ -11,8 +11,8 @@ echo "lock nasty suffer dirt dream fine fall deal curtain plate husband sound to
 echo "smile stem oven genius cave resource better lunar nasty moon company ridge brass rather supply used horn three panic put venue analyst leader comic" \
     | wasmd keys add requester --recover --keyring-backend test
 
-cp ./celatone-docker/single-validator/priv_validator_key.json ~/.wasmd/config/priv_validator_key.json
-cp ./celatone-docker/single-validator/node_key.json ~/.wasmd/config/node_key.json
+cp ./celatone-docker/validator/priv_validator_key.json ~/.wasmd/config/priv_validator_key.json
+cp ./celatone-docker/validator/node_key.json ~/.wasmd/config/node_key.json
 
 # add accounts to genesis
 wasmd genesis add-genesis-account validator 10000000000000stake --keyring-backend test
