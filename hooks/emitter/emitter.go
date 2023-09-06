@@ -53,7 +53,6 @@ func NewHook(
 	accountKeeper *authkeeper.AccountKeeper,
 	logger log.Logger,
 ) *Hook {
-	fmt.Println("MESSAGES_TOPIC", os.Getenv("MESSAGES_TOPIC"))
 	bootstrapServer := os.Getenv("KAFKA_BOOTSTRAP_SERVER")
 	messagesTopic := os.Getenv("MESSAGES_TOPIC")
 	mechanism := plain.Mechanism{
